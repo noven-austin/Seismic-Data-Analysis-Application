@@ -1,14 +1,16 @@
-import tkinter as tk
-from tkinter import ttk
-from tkinter import filedialog, messagebox
-import obspy
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import pandas as pd
-from obspy.taup import TauPyModel
-from tkinter import StringVar
-from PyEMD import EMD
-from scipy.signal import wiener
+#Libraries used
+import obspy                                                         # Seismic data processing
+import pandas as pd                                                  # Handling CSV output
+import tkinter as tk                                                 # GUI Components
+from tkinter import ttk, filedialog, messagebox                      
+import matplotlib.pyplot as plt                                      # Visualization
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg      
+from PyEMD import EMD                                                # Empirical Mode Decomposition of seismic signal
+from tkinter import StringVar                                        
+from scipy.signal import wiener                                      # Wiener filtering (noise reduction)
+from obspy.taup import TauPyModel                                    # Calculating seismic wave travel times
+
+# Earth Models used for time travel calculations
 models = {
     "iasp91": TauPyModel(model="iasp91"),
     "ak135": TauPyModel(model="ak135"),
@@ -17,17 +19,21 @@ models = {
 
 class SeismicApp:
     def __init__(self, root):
+        # Initialize main window, title, and size.
         self.root = root
         self.root.title("Seismic Time Series Analyzer")
         self.root.geometry("900x700")
         self.root.resizable(True, True)
 
+        # Top frame contains button for upload and options.
         self.top_frame = ttk.Frame(root)
         self.top_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
+        # Upload SAC file button.
         self.upload_btn = ttk.Button(self.top_frame, text="Upload SAC File", command=self.upload_file)
         self.upload_btn.pack(side=tk.LEFT, padx=5)
-
+        
+        # Dropdown menu to select earth model.
         self.model_var = StringVar(value="iasp91")
         self.model_dropdown = ttk.Combobox(
             self.top_frame, textvariable=self.model_var, values=list(models.keys()), state="readonly", width=10
@@ -35,37 +41,49 @@ class SeismicApp:
         self.model_dropdown.pack(side=tk.LEFT, padx=10)
         self.model_dropdown.bind("<<ComboboxSelected>>", self.update_model_selection)
 
+        # Checkbox for weiner filter application on seismic data.
         self.wiener_value = tk.IntVar(value=0)
         self.wiener_check = ttk.Checkbutton(self.top_frame, variable=self.wiener_value, text="Wiener", command=self.toggle_wiener)
         self.wiener_check.pack(side=tk.LEFT, padx= 5)
 
+        # Frame to contain metadata and arrival time information.
         self.info_frame = ttk.Frame(root)
         self.info_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
+        # Frame to display metadata extracted from the SAC file.
         self.metadata_frame = ttk.LabelFrame(self.info_frame, text="Metadata", padding=(5, 5), relief="solid", borderwidth=2)
         self.metadata_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.metadata_label = ttk.Label(self.metadata_frame, text="Metadata will appear here", justify="left", anchor="w")
         self.metadata_label.pack(anchor="nw", padx=5, pady=5)
+
+        # Frame to display calculated seismis phase arrival time.
         self.arrival_frame = ttk.LabelFrame(self.info_frame, text="Arrival Times", padding=(5, 5), relief="solid", borderwidth=2)
         self.arrival_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-
+        
+        # 
         self.arrival_content_frame = ttk.Frame(self.arrival_frame)
         self.arrival_content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+        #
         self.arrival_times_top = ttk.LabelFrame(self.arrival_content_frame, text="Current Arrival Times", padding=(5, 5), relief="solid", borderwidth=2)
         self.arrival_times_top.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.arrival_label = ttk.Label(self.arrival_times_top, text="Arrival Times will appear here", justify="left", anchor="w")
         self.arrival_label.pack(anchor="nw", padx=5, pady=5)
 
+        # Lower subframe containing additional functions ( Seismic phase splitting using EMD )
         self.arrival_times_bottom = ttk.LabelFrame(self.arrival_content_frame, text="Additional Functions", padding=(5, 5), relief="solid", borderwidth=2)
         self.arrival_times_bottom.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Button to process and split P-wave using EMD.
         self.split_p_btn = ttk.Button(self.arrival_times_bottom, text="Split P", command=lambda: self.applyEMD("p"),state=tk.DISABLED)
         self.split_p_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        # Button to process and split S-wave using EMD.
         self.split_s_btn = ttk.Button(self.arrival_times_bottom, text="Split S", command=lambda: self.applyEMD("s"), state=tk.DISABLED)
         self.split_s_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        # Button to revert to the original signal.
         self.revert_btn = ttk.Button(self.arrival_times_bottom, text="View Original", command=self.revert_to_original, state=tk.DISABLED)
         self.revert_btn.pack(side=tk.LEFT, padx=5, pady=5)
 
+        # Frame containing the download button for CSV data and image.
         self.download_frame = ttk.LabelFrame(self.info_frame, text="Download Options", padding=(5, 5), relief="solid", borderwidth=2)
         self.download_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.download_data_btn = ttk.Button(self.download_frame, text="Download .csv", command=self.download_data, state=tk.DISABLED)
@@ -73,6 +91,7 @@ class SeismicApp:
         self.download_image_btn = ttk.Button(self.download_frame, text="Download Figure", command=self.download_image, state=tk.DISABLED)
         self.download_image_btn.pack(pady=5)
 
+        # Frame to display the seismic time series.
         self.plot_frame = ttk.Frame(root)
         self.plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.figure = plt.Figure(figsize=(8, 5), dpi=100)
@@ -80,6 +99,7 @@ class SeismicApp:
         self.canvas = FigureCanvasTkAgg(self.figure, self.plot_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+        # Variable initializations
         self.file_data = None
         self.arrival_times = {}
         self.selected_model = "iasp91"
